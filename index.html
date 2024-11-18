@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PV String Optimizer</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .input-group { margin-bottom: 15px; }
+        label { display: inline-block; width: 200px; margin-right: 10px; }
+        input[type="number"] { width: 100px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; margin-bottom: 10px; }
+        button:hover { background-color: #45a049; }
+        #result { margin-top: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .error { color: red; margin-top: 10px; }
+        .success { color: green; margin-top: 10px; }
+        .suggestion { color: #ff6600; margin-top: 10px; padding: 10px; background-color: #fff3e6; border-radius: 4px; }
+        .statistics { margin-top: 15px; padding: 10px; background-color: #e6f3ff; border-radius: 4px; }
+        #solutions { max-height: 400px; overflow-y: auto; margin-top: 15px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>PV String Optimizer</h1>
+    <div class="input-group">
+        <label for="totalPanels">Tổng số tấm PV:</label>
+        <input type="number" id="totalPanels" min="1" required>
+    </div>
+    <div class="input-group">
+        <label for="minPanels">Số tấm tối thiểu mỗi string:</label>
+        <input type="number" id="minPanels" value="15" min="1" required>
+    </div>
+    <div class="input-group">
+        <label for="maxPanels">Số tấm tối đa mỗi string:</label>
+        <input type="number" id="maxPanels" value="20" min="1" required>
+    </div>
+    <div class="input-group">
+        <label for="fixedPanels">Số tấm PV cố định (nếu có):</label>
+        <input type="number" id="fixedPanels" placeholder="17, 18, ...">
+    </div>
+    <button onclick="findCombinations()">Tìm tất cả phương án</button>
+    <button id="downloadBtn" onclick="downloadCSV()" disabled>Tải kết quả (CSV)</button>
+    <div id="result"></div>
+    <div id="solutions"></div>
+</div>
+
+<script>
+let allCombinations = [];
+
+function findAllCombinations(totalPanels, minPanels, maxPanels, fixedPanels = null) {
+    const combinations = new Set();
+    const maxStrings = Math.ceil(totalPanels / minPanels);
+    const minStrings = Math.floor(totalPanels / maxPanels);
+
+    for (let numStrings = minStrings; numStrings <= maxStrings; numStrings++) {
+        distributeRemainingPanels([], 0, numStrings, totalPanels, minPanels, maxPanels, fixedPanels, combinations);
+    }
+
+    return Array.from(combinations).sort((a, b) => {
+        // Sort by the first difference
+        for (let i = 0; i < a.length && i < b.length; i++) {
+            if (a[i] !== b[i]) return a[i] - b[i];
+        }
+        return a.length - b.length;
+    });
+}
+
+function distributeRemainingPanels(currentSolution, currentTotal, numStrings, totalPanels, minPanels, maxPanels, fixedPanels, combinations) {
+    // Add fixed panel if it exists and hasn't been added yet
+    if (fixedPanels && !currentSolution.includes(fixedPanels) && 
+        fixedPanels >= minPanels && fixedPanels <= maxPanels) {
+        if (currentTotal + fixedPanels > totalPanels) return;
+        currentSolution.push(fixedPanels);
+        currentTotal += fixedPanels;
+    }
+
+    // If we have the right number of strings and the total matches
+    if (currentSolution.length === numStrings && currentTotal === totalPanels) {
+        // Sort the solution to avoid duplicates
+        const sortedSolution = [...currentSolution].sort((a, b) => a - b);
+        const solutionKey = sortedSolution.join(',');
+        combinations.add(solutionKey);
+        return;
+    }
+
+    // If we've exceeded the total panels or strings, stop
+    if (currentSolution.length > numStrings || currentTotal > totalPanels) {
+        return;
+    }
+
+    // Try adding different panel counts for the next string
+    for (let panelCount = minPanels; panelCount <= maxPanels; panelCount++) {
+        // Skip if adding would exceed total panels
+        if (currentTotal + panelCount > totalPanels) break;
+
+        // Create a copy of the current solution and add the new possibility
+        const newSolution = [...currentSolution, panelCount];
+        const newTotal = currentTotal + panelCount;
+
+        // Recursively try to complete the solution
+        distributeRemainingPanels(
+            newSolution, 
+            newTotal, 
+            numStrings, 
+            totalPanels, 
+            minPanels, 
+            maxPanels, 
+            null,  // Clear fixedPanels after first use
+            combinations
+        );
+    }
+}
+
+function findCombinations() {
+    const totalPanels = parseInt(document.getElementById('totalPanels').value);
+    const minPanels = parseInt(document.getElementById('minPanels').value);
+    const maxPanels = parseInt(document.getElementById('maxPanels').value);
+    const fixedPanels = parseInt(document.getElementById('fixedPanels').value) || null;
+    
+    const resultDiv = document.getElementById('result');
+    const solutionsDiv = document.getElementById('solutions');
+    
+    // Input validation
+    if (!totalPanels || !minPanels || !maxPanels) {
+        resultDiv.innerHTML = '<p class="error">Vui lòng nhập đầy đủ thông tin!</p>';
+        solutionsDiv.innerHTML = '';
+        document.getElementById('downloadBtn').disabled = true;
+        return;
+    }
+
+    if (minPanels > maxPanels) {
+        resultDiv.innerHTML = '<p class="error">Số tấm tối thiểu không được lớn hơn số tấm tối đa!</p>';
+        solutionsDiv.innerHTML = '';
+        document.getElementById('downloadBtn').disabled = true;
+        return;
+    }
+
+    // Find all combinations
+    allCombinations = findAllCombinations(totalPanels, minPanels, maxPanels, fixedPanels);
+
+    // Display results
+    if (allCombinations.length === 0) {
+        resultDiv.innerHTML = `<p class="error">Không thể phân chia ${totalPanels} tấm PV với các điều kiện đã cho!</p>`;
+        solutionsDiv.innerHTML = '';
+        document.getElementById('downloadBtn').disabled = true;
+        return;
+    }
+
+    // Update result header
+    resultDiv.innerHTML = `<p class="success">Tìm được ${allCombinations.length} phương án phân chia:</p>`;
+
+    // Create solutions display
+    let solutionsHTML = '<table><tr><th>STT</th><th>Phân bổ string</th><th>Chi tiết</th></tr>';
+    allCombinations.forEach((solution, index) => {
+        const panels = solution.split(',').map(Number);
+        const statistics = calculateStringStatistics(panels);
+        
+        solutionsHTML += `<tr>
+            <td>${index + 1}</td>
+            <td>${panels.join(', ')}</td>
+            <td>${Object.entries(statistics)
+                .map(([panelCount, count]) => `${count} string ${panelCount} tấm`)
+                .join(', ')
+            }</td>
+        </tr>`;
+    });
+    solutionsHTML += '</table>';
+    
+    solutionsDiv.innerHTML = solutionsHTML;
+    document.getElementById('downloadBtn').disabled = false;
+}
+
+function calculateStringStatistics(solution) {
+    const statistics = {};
+    solution.forEach(numPanels => {
+        statistics[numPanels] = (statistics[numPanels] || 0) + 1;
+    });
+    return statistics;
+}
+
+function downloadCSV() {
+    if (allCombinations.length === 0) return;
+
+    const totalPanels = document.getElementById('totalPanels').value;
+    const minPanels = document.getElementById('minPanels').value;
+    const maxPanels = document.getElementById('maxPanels').value;
+    const fixedPanels = document.getElementById('fixedPanels').value || 'Không có';
+
+    let csv = 'Thông tin phân chia String PV\n';
+    csv += `Tổng số tấm PV,${totalPanels}\n`;
+    csv += `Số tấm tối thiểu,${minPanels}\n`;
+    csv += `Số tấm tối đa,${maxPanels}\n`;
+    csv += `Số tấm cố định,${fixedPanels}\n`;
+    csv += `Tổng số phương án,${allCombinations.length}\n\n`;
+
+    csv += 'Danh sách phương án:\n';
+    csv += 'STT,Phân bổ string,Chi tiết phương án\n';
+
+    allCombinations.forEach((solution, index) => {
+        const panels = solution.split(',').map(Number);
+        const statistics = calculateStringStatistics(panels);
+        
+        const detailStats = Object.entries(statistics)
+            .map(([panelCount, count]) => `${count} string ${panelCount} tấm`)
+            .join('; ');
+        
+        csv += `${index + 1},"${panels.join(', ')}","${detailStats}"\n`;
+    });
+
+    const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+    const link = document.createElement('a');
+    link.setAttribute('href', URL.createObjectURL(blob));
+    link.setAttribute('download', 'pv_string_optimization.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+</script>
+</body>
+</html>
